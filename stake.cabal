@@ -41,8 +41,7 @@ common lang
 library
     import: lang
     exposed-modules:
-      MyModule
-      Plutus.Contracts.Game
+      Stake
     build-depends:
       base >= 4.9 && < 5,
       aeson,
@@ -54,7 +53,7 @@ library
       plutus-tx-plugin,
       plutus-tx,
       plutus-ledger,
-    hs-source-dirs: src examples/src
+    hs-source-dirs: src
 
 test-suite plutus-example-projects-test
   import: lang
@@ -94,3 +93,45 @@ executable plutus-starter-pab
     plutus-ledger -any,
     openapi3 -any,
 
+executable           script-dump
+  main-is:           script-dump.hs
+  hs-source-dirs:    exe, src
+  other-modules:     Stake
+  build-depends:     base
+                    , aeson
+                    , cardano-api
+                    , cardano-ledger-alonzo
+                    , bytestring
+                    , containers
+                    , freer-extras
+                    , plutus-core
+                    , plutus-contract
+                    , plutus-ledger
+                    , plutus-ledger-api
+                    , plutus-tx
+                    , plutus-tx-plugin
+                    , text
+                    , serialise
+                    , playground-common
+  default-language:   Haskell2010
+  default-extensions: DataKinds
+                      DeriveAnyClass
+                      DeriveGeneric
+                      DerivingStrategies
+                      ExplicitForAll
+                      FunctionalDependencies
+                      GADTs
+                      MultiParamTypeClasses
+                      NamedFieldPuns
+                      OverloadedStrings
+                      PolyKinds
+                      KindSignatures
+                      StandaloneDeriving
+                      TemplateHaskell
+                      TypeApplications
+                      TypeFamilies
+                      TypeOperators
+                      MultiParamTypeClasses
+                      ScopedTypeVariables
+                      StandaloneKindSignatures
+  ghc-options:        -Wall -fobject-code -fno-ignore-interface-pragmas -fno-omit-interface-pragmas -fno-strictness -fno-spec-constr -fno-specialise
