@@ -1,5 +1,5 @@
 {--
-   Copyright 2021 ₳DAO
+   Copyright 2022 ₳DAO
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
---}
+-}
 
 {-# LANGUAGE DataKinds             #-}
 {-# LANGUAGE DeriveAnyClass        #-}
@@ -32,9 +32,11 @@ module Stake where
 
 import           Prelude                (String, show, Show)
 import           Control.Monad          hiding (fmap)
+import           PlutusTx.Builtins      as Builtins
 import           PlutusTx.Maybe
 import qualified Data.Map               as Map
-import           Data.Text              (Text)
+-- import           Data.Ord
+-- import           Data.Text              (Text)
 import           Data.Void              (Void)
 import           Plutus.Contract        as Contract
 import qualified PlutusTx
@@ -56,153 +58,81 @@ import           Text.Printf            (printf)
 import           GHC.Generics         (Generic)
 import           Data.String          (IsString (..))
 import           Data.Aeson           (ToJSON, FromJSON)
-import           Data.List              (union, intersect)
 
--- If the proposal is an update then it can have a new validatorhash to spend to.
-data StakingScript = StakingScript
-    { parameter1 :: !Integer
-    } deriving (Show, Generic, FromJSON, ToJSON)
+data StakeDatum = StakeDatum PubKeyHash
 
-PlutusTx.makeIsDataIndexed ''StakingScript [ ('StakingScript, 0) ]
-PlutusTx.makeLift ''StakingScript
-
-data Ownership = Ownership
-    { owner     :: !PubKeyHash
-    , lastMoved :: !POSIXTime
-    } deriving (Show, Generic, FromJSON, ToJSON)
-
-PlutusTx.makeIsDataIndexed ''Ownership [ ('Ownership, 0) ]
-PlutusTx.makeLift ''Ownership
-
-data Treasure = Treasure
-    { totalStaked :: !Integer
-    } deriving (Show, Generic, FromJSON, ToJSON)
-
-PlutusTx.makeIsDataIndexed ''Treasure [ ('Treasure, 0) ]
-PlutusTx.makeLift ''Treasure
-
-data StakeDatum = Owned Ownership | Treasury
-    deriving (Show, Generic, FromJSON, ToJSON)
-
-PlutusTx.makeIsDataIndexed ''StakeDatum [ ('Owned,    0)
-                                        , ('Treasury, 2)
-                                        ]
+PlutusTx.makeIsDataIndexed ''StakeDatum [ ('StakeDatum,  0) ]
 PlutusTx.makeLift ''StakeDatum
 
-data StakeAction = Validate | Collect | Withdraw
-    deriving (Show, Generic, FromJSON, ToJSON)
+data StakeRedeemer = Use | Remove
 
-PlutusTx.makeIsDataIndexed ''StakeAction [ ('Validate, 0)
-                                         , ('Collect,  1)
-                                         , ('Withdraw, 2)
-                                         ]
-PlutusTx.makeLift ''StakeAction
+PlutusTx.makeIsDataIndexed ''StakeRedeemer [ ('Use, 0)
+                                           , ('Remove, 1)
+                                           ]
+PlutusTx.makeLift ''StakeRedeemer
+
+{-# INLINABLE getDatum' #-}
+getDatum' :: TxInfo -> TxOut -> Maybe StakeDatum
+getDatum' txInfo o = do
+  dh      <- txOutDatum o
+  Datum d <- findDatum dh txInfo
+  PlutusTx.fromBuiltinData d
+
+{-# INLINABLE matchesUser #-}
+matchesUser :: TxInfo -> PubKeyHash -> TxOut -> Bool
+matchesUser info x v =
+  let d = getDatum' info v
+  in case d of
+    Just (StakeDatum x') -> x == x'
+    Nothing            -> False
+
+{-# INLINABLE spentOwned #-}
+spentOwned :: TxInfo -> PubKeyHash -> Value
+spentOwned info x =
+  let outs = txInfoOutputs info
+      ownedOuts = [txOutValue v | v <- outs, matchesUser info x v]
+  in
+    foldr (<>) mempty ownedOuts
+
+{-# INLINABLE outOwned #-}
+outOwned :: TxInfo -> PubKeyHash -> Value
+outOwned info x =
+  let ins = [txInInfoResolved i | i <- txInfoInputs info]
+      ownedIns = [txOutValue v | v <- ins, matchesUser info x v]
+  in
+    foldr (<>) mempty ownedIns
 
 data Stakeing
 instance Scripts.ValidatorTypes Stakeing where
-    type instance RedeemerType Stakeing = StakeAction
+    type instance RedeemerType Stakeing = StakeRedeemer
     type instance DatumType Stakeing = StakeDatum
 
--- Datum Related Functions:
-{-# INLINABLE findStakeDatum #-}
-findStakeDatum :: TxInfo -> TxOut -> Maybe StakeDatum
-findStakeDatum txInfo o = do
-    dh      <- txOutDatum o
-    Datum d <- findDatum dh txInfo
-    PlutusTx.fromBuiltinData d
-
--- Asset Related Functions
-{-# INLINABLE collectionMinted #-}
-collectionMinted :: ScriptContext -> AssetClass -> Integer
-collectionMinted ctx collectionAsset =
-  let
-    mintVal = txInfoMint $ scriptContextTxInfo ctx
-  in
-    assetClassValueOf mintVal collectionAsset
-
-{-# INLINABLE assetContinues #-}
-assetContinues :: ScriptContext -> [TxOut] -> AssetClass -> Bool
-assetContinues ctx continuingOutputs asset =
-    sum [assetClassValueOf (txOutValue x) asset | x <- continuingOutputs] > 0
-
--- High-Level Functions -- ehh lmao
-{-# INLINABLE containsClass #-}
-containsClass :: TxOut -> AssetClass -> Bool
-containsClass o a = (assetClassValueOf (txOutValue o) a) > 0
-
-{--
-
-{-# INLINABLE getOutput #-}
-getOutput :: [TxOut] -> AssetClass -> TxOut
-getOutput txOuts asset = case [o | o <- txOuts, containsClass o asset] of
-    [x] -> x
-    _   -> traceError "Fail here."
-
-{-# INLINABLE containsPot #-}
-containsPot :: TxInfo -> TxOut -> Bool
-containsPot info o =
-  let d = potDatum info o
-  in case d of
-    Just PotDatum -> True
-    _             -> False
-
-{-# INLINABLE getOutputPDatum #-}
-getOutputPDatum :: TxInfo -> [TxOut] -> TxOut
-getOutputPDatum info txOuts = case [o | o <- txOuts, containsPot info o] of
-    [x] -> x
-    _   -> traceError "Fail here."
-
---}
-
-{-- {-# INLINABLE startCollectionDatum #-}
-startCollectionDatum :: Maybe StakeDatum -> Bool
-startCollectionDatum md = case md of
-  Just (CollectionDatum c) ->
-    length (votes c) == 0
-  _                        -> False
-
-{-# INLINABLE validMakerDatum #-}
-validMakerDatum :: Maybe StakeDatum -> Bool
-validMakerDatum md = case md of
-  Just CollectionMaker ->
-    True
-  _                        -> False
-
-{-# INLINABLE validPotDatum #-}
-validPotDatum :: Maybe StakeDatum -> Bool
-validPotDatum md = case md of
-  Just PotDatum ->
-    True
-  _                        -> False --}
-
--- We only can have one CollectionDatum/Token - We need to implement these - definitely.
--- We only can have one 
-
 {-# INLINABLE stakeScript #-}
-stakeScript :: StakingScript -> StakeDatum -> StakeAction -> ScriptContext -> Bool
-stakeScript bounty datum action ctx = case datum of
-    Owned o  -> case action of
-      Validate -> True
-      Collect  -> True
-      Withdraw -> True
-      _        -> False
-    Treasury -> case action of
-      Collect -> True
-      _       -> False
+stakeScript :: [PubKeyHash] -> StakeDatum -> StakeRedeemer -> ScriptContext -> Bool
+stakeScript batchers datum action ctx =
+  let info = scriptContextTxInfo ctx
+  in case datum of
+    StakeDatum x ->
+      (txSignedBy info x)
+      ||
+      ((gt (spentOwned info x) (outOwned info x))
+      &&
+      (length [s | s <- batchers, txSignedBy info s] > 0))
+    _ -> False
 
-stakeValidatorInstance :: StakingScript -> Scripts.TypedValidator Stakeing
-stakeValidatorInstance bounty = Scripts.mkTypedValidator @Stakeing
+stakeValidatorInstance :: [PubKeyHash] -> Scripts.TypedValidator Stakeing
+stakeValidatorInstance cur = Scripts.mkTypedValidator @Stakeing
     ($$(PlutusTx.compile [|| stakeScript ||])
     `PlutusTx.applyCode`
-    PlutusTx.liftCode bounty)
+    PlutusTx.liftCode cur)
     $$(PlutusTx.compile [|| wrap ||]) where
-        wrap = Scripts.wrapValidator @StakeDatum @StakeAction
+        wrap = Scripts.wrapValidator @StakeDatum @StakeRedeemer
 
-stakeValidatorHash :: StakingScript -> ValidatorHash
-stakeValidatorHash bounty = Scripts.validatorHash (stakeValidatorInstance bounty)
+stakeValidatorHash :: [PubKeyHash] -> ValidatorHash
+stakeValidatorHash cur = Scripts.validatorHash (stakeValidatorInstance cur)
 
-stakeValidatorScript :: StakingScript -> Validator
-stakeValidatorScript bounty = Scripts.validatorScript (stakeValidatorInstance bounty)
+stakeValidatorScript :: [PubKeyHash] -> Validator
+stakeValidatorScript cur = Scripts.validatorScript (stakeValidatorInstance cur)
 
-stakeValidatorAddress :: StakingScript -> Address
-stakeValidatorAddress bounty = Ledger.scriptAddress (stakeValidatorScript bounty)
+stakeValidatorAddress :: [PubKeyHash] -> Address
+stakeValidatorAddress cur = Ledger.scriptAddress (stakeValidatorScript cur)

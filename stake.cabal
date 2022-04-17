@@ -61,7 +61,7 @@ test-suite plutus-example-projects-test
   main-is: Spec.hs
   hs-source-dirs: examples/test
   other-modules:
-    Spec.Game
+    Spec.Model
   build-depends:
     plutus-tx -any,
     plutus-tx-plugin,
@@ -73,25 +73,6 @@ test-suite plutus-example-projects-test
     tasty -any,
     tasty-hunit -any,
     tasty-hedgehog >=0.2.0.0
-
-executable plutus-starter-pab
-  import: lang
-  main-is: Main.hs
-  hs-source-dirs: pab
-  ghc-options:
-    -threaded
-  build-depends:
-    base >= 4.9 && < 5,
-    data-default -any,
-    plutus-contract -any,
-    plutus-pab -any,
-    plutus-starter -any,
-    aeson -any,
-    freer-simple -any,
-    prettyprinter -any,
-    freer-extras -any,
-    plutus-ledger -any,
-    openapi3 -any,
 
 executable           script-dump
   main-is:           script-dump.hs
