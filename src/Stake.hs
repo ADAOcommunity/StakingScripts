@@ -59,7 +59,9 @@ import           GHC.Generics         (Generic)
 import           Data.String          (IsString (..))
 import           Data.Aeson           (ToJSON, FromJSON)
 
-data StakeDatum = StakeDatum PubKeyHash
+data StakeDatum = StakeDatum {
+  owner :: !PubKeyHash
+} deriving (Generic, ToJSON, FromJSON)
 
 PlutusTx.makeIsDataIndexed ''StakeDatum [ ('StakeDatum,  0) ]
 PlutusTx.makeLift ''StakeDatum
