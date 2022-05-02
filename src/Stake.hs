@@ -59,11 +59,35 @@ import           GHC.Generics         (Generic)
 import           Data.String          (IsString (..))
 import           Data.Aeson           (ToJSON, FromJSON)
 
-data StakeDatum = StakeDatum {
+data PersonalStake = PersonalStake {
   owner :: !PubKeyHash
 } deriving (Generic, ToJSON, FromJSON)
 
-PlutusTx.makeIsDataIndexed ''StakeDatum [ ('StakeDatum,  0) ]
+PlutusTx.makeIsDataIndexed ''PersonalStake [ ('PersonalStake,  0) ]
+PlutusTx.makeLift ''PersonalStake
+
+data ODatumHash = ODHash DatumHash | OUnit ()
+  deriving (Generic, ToJSON, FromJSON)
+
+PlutusTx.makeIsDataIndexed ''ODatumHash [ ('ODHash, 0)
+                                        , ('OUnit,  1)
+                                        ]
+PlutusTx.makeLift ''ODatumHash
+
+data ContractStake = ContractStake {
+  cOwner :: !Address,
+  dHash :: !ODatumHash,
+  end   :: !POSIXTime
+} deriving (Generic, ToJSON, FromJSON)
+
+PlutusTx.makeIsDataIndexed ''ContractStake [ ('ContractStake,  0) ]
+PlutusTx.makeLift ''ContractStake
+
+data StakeDatum = PStake PersonalStake | CStake ContractStake
+
+PlutusTx.makeIsDataIndexed ''StakeDatum [ ('PStake, 0)
+                                        , ('CStake, 1)
+                                        ]
 PlutusTx.makeLift ''StakeDatum
 
 data StakeRedeemer = Use | Remove
@@ -85,8 +109,8 @@ matchesUser :: TxInfo -> PubKeyHash -> TxOut -> Bool
 matchesUser info x v =
   let d = getDatum' info v
   in case d of
-    Just (StakeDatum x') -> x == x'
-    Nothing            -> False
+    Just (PStake ps) -> x == (owner ps)
+    _                -> False
 
 {-# INLINABLE spentOwned #-}
 spentOwned :: TxInfo -> PubKeyHash -> Value
@@ -114,13 +138,14 @@ stakeScript :: [PubKeyHash] -> StakeDatum -> StakeRedeemer -> ScriptContext -> B
 stakeScript batchers datum action ctx =
   let info = scriptContextTxInfo ctx
   in case datum of
-    StakeDatum x ->
-      (txSignedBy info x)
+    PStake x     ->
+      (txSignedBy info (owner x))
       ||
-      ((gt (spentOwned info x) (outOwned info x))
+      ((gt (spentOwned info (owner x)) (outOwned info (owner x)))
       &&
       (length [s | s <- batchers, txSignedBy info s] > 0))
-    _ -> False
+    CStake cs    -> False
+    _            -> False
 
 stakeValidatorInstance :: [PubKeyHash] -> Scripts.TypedValidator Stakeing
 stakeValidatorInstance cur = Scripts.mkTypedValidator @Stakeing
