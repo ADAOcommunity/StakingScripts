@@ -25,7 +25,11 @@ import           Data.Aeson
 import           GHC.Num (encodeDoubleInteger)
 
 batchers :: [PubKeyHash]
-batchers = [] -- This just means that noone can use the staked UTxO(s) other than the 'owner'.
+-- batchers = ["fe0921cfa53b2deef20f185258f8bc6e127ab6fa1084e62f0830ddef"] -- This just means that noone can use the staked UTxO(s) other than the 'owner'.
+batchers = ["45df59537ff070fe9be374ad77630cb4d2dca70ce09c44881e8460da"]
+
+l :: Maybe Integer
+l = Nothing
 
 main :: IO ()
 main = do
@@ -46,10 +50,16 @@ main = do
         validatorShortBs = SBS.toShort . LB.toStrict $ validatorAsCbor
         validatorScript = PlutusScriptSerialised validatorShortBs
 
+        datumAsCbor = serialise l
+        datumAsJson = Data.Aeson.toJSON l
+
+
       putStrLn $ "Writing output to: " ++ validatorname
       writePlutusScript' scriptnum validatorname validatorScript validatorShortBs
 
       writeFile "validator-hash.txt" (show $ stakeValidatorHash batchers)
+      writeFile "datum-cbor.txt" (show $ datumAsCbor)
+      writeFile "datum-json.txt" (show $ datumAsJson)
 
 writePlutusScript' :: Integer -> FilePath -> PlutusScript PlutusScriptV1 -> SBS.ShortByteString -> IO ()
 writePlutusScript' scriptnum filename scriptSerial scriptSBS =
