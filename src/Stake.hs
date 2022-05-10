@@ -141,8 +141,8 @@ stakeScript batchers datum action ctx =
     PStake x     ->
       (txSignedBy info (owner x))
       ||
-      ((gt (spentOwned info (owner x)) (outOwned info (owner x)))
-      &&
+      ((geq (spentOwned info (owner x)) (outOwned info (owner x)))
+      && -- The above is backwards but the logic is sound.
       (length [s | s <- batchers, txSignedBy info s] > 0))
     CStake cs    -> False
     _            -> False
