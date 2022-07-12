@@ -105,26 +105,29 @@ getDatum' txInfo o = do
   PlutusTx.fromBuiltinData d
 
 {-# INLINABLE matchesUser #-}
-matchesUser :: TxInfo -> PubKeyHash -> TxOut -> Bool
-matchesUser info x v =
+matchesUser :: ValidatorHash -> TxInfo -> PubKeyHash -> TxOut -> Bool
+matchesUser h info x v =
   let d = getDatum' info v
   in case d of
-    Just (PStake ps) -> x == (owner ps)
+    Just (PStake ps) -> x == (owner ps) &&
+      case (addressCredential $ txOutAddress v) of
+        ScriptCredential h' -> h == h'
+        PubKeyCredential _  -> False
     _                -> False
 
 {-# INLINABLE spentOwned #-}
-spentOwned :: TxInfo -> PubKeyHash -> Value
-spentOwned info x =
+outOwned :: ValidatorHash -> TxInfo -> PubKeyHash -> Value
+outOwned h info x =
   let outs = txInfoOutputs info
-      ownedOuts = [txOutValue v | v <- outs, matchesUser info x v]
+      ownedOuts = [txOutValue v | v <- outs, matchesUser h info x v]
   in
     foldr (<>) mempty ownedOuts
 
 {-# INLINABLE outOwned #-}
-outOwned :: TxInfo -> PubKeyHash -> Value
-outOwned info x =
+spentOwned :: ValidatorHash -> TxInfo -> PubKeyHash -> Value
+spentOwned h info x =
   let ins = [txInInfoResolved i | i <- txInfoInputs info]
-      ownedIns = [txOutValue v | v <- ins, matchesUser info x v]
+      ownedIns = [txOutValue v | v <- ins, matchesUser h info x v]
   in
     foldr (<>) mempty ownedIns
 
@@ -137,12 +140,13 @@ instance Scripts.ValidatorTypes Stakeing where
 stakeScript :: [PubKeyHash] -> StakeDatum -> StakeRedeemer -> ScriptContext -> Bool
 stakeScript batchers datum action ctx =
   let info = scriptContextTxInfo ctx
+      hash = ownHash ctx
   in case datum of
     PStake x     ->
       (txSignedBy info (owner x))
       ||
-      ((geq (spentOwned info (owner x)) (outOwned info (owner x)))
-      && -- The above is backwards but the logic is sound.
+      ((geq (outOwned hash info (owner x)) (spentOwned hash info (owner x)))
+      &&
       (length [s | s <- batchers, txSignedBy info s] > 0))
     CStake cs    -> False
     _            -> False
